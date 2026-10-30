@@ -2,7 +2,8 @@
 <html lang="uk">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <title>Калькулятор світла</title>
 <style>
   /* Layout: одна вузька колонка — показання, місяці й додаткові суми зверху, рахунок з розбивкою під ними */
@@ -1444,6 +1445,18 @@ module.exports = QRCode;
 return req("./index");})();
 </script>
 <script>
+  // Telegram: повідомляємо, що сторінка готова, і розгортаємо її (поза Telegram нічого не робить)
+  var tg = window.Telegram && window.Telegram.WebApp;
+  if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
+  // Android WebView інколи не перемальовує поля, поки відкрита клавіатура: «підштовхуємо» перемальовування при введенні й зміні розміру
+  function nudge() {
+    try { var b = document.body; b.style.transform = 'translateZ(0)'; void b.offsetHeight; requestAnimationFrame(function () { b.style.transform = ''; }); } catch (e) {}
+  }
+  document.addEventListener('input', nudge, true);
+  document.addEventListener('focusin', nudge, true);
+  window.addEventListener('resize', nudge);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', nudge);
+
   function el(id) { return document.getElementById(id); }
   var ids = ['dprev','dcur','nprev','ncur','months','target','tday','tnight','fktp','fserv','flight'];
 
