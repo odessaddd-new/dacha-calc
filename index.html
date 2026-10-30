@@ -1,9 +1,9 @@
 <!doctype html>
 <!--
   Калькулятор світла (Telegram + Viber), GitHub Pages.
-  ВЕРСІЯ СТОРІНКИ: 1.1.1 (30.10.2026) — показується внизу сторінки («Версія сторінки …») і в PDF.
+  ВЕРСІЯ СТОРІНКИ: 1.1.2 (30.10.2026) — показується внизу сторінки («Версія сторінки …») і в PDF.
   Змінюючи файл, піднімайте версію в ТРЬОХ місцях: цей рядок, текст внизу сторінки (id="ver") і const PAGE_VERSION.
-  Історія: 1.0.0 — початковий калькулятор; 1.1.0 — рахунок на оплату в PDF, viewport; 1.1.1 — Telegram: ready/expand і перемальовування полів (Android).
+  Історія: 1.0.0 — початковий калькулятор; 1.1.0 — рахунок на оплату в PDF, viewport; 1.1.1 — Telegram: ready/expand і перемальовування полів (Android); 1.1.2 — прокручується внутрішній блок #app замість документа, прибрано «підштовхування» (збій полів у Telegram на Android).
 -->
 <html lang="uk">
 <head>
@@ -40,9 +40,12 @@
 </style>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;600;700&display=swap">
 <style>
-  html, body { margin: 0; }
-  body {
-    background: var(--bg); color: var(--fg); font: 16px/1.5 var(--font);
+  /* Прокручується не весь документ, а внутрішній блок #app: так вікно Telegram на Android не губить перемальовування при клавіатурі */
+  html, body { margin: 0; height: 100%; overflow: hidden; }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.5 var(--font); }
+  #app {
+    position: fixed; top: 0; right: 0; bottom: 0; left: 0; overflow-y: auto; overflow-x: hidden;
+    -webkit-overflow-scrolling: touch; overscroll-behavior: contain; box-sizing: border-box;
     padding-block: 28px 40px;
     padding-left: max(16px, env(safe-area-inset-left, 0px));
     padding-right: max(16px, env(safe-area-inset-right, 0px));
@@ -103,6 +106,7 @@
 
 </head>
 <body>
+<div id="app">
 <main>
   <header>
     <h1>Калькулятор світла</h1>
@@ -189,8 +193,9 @@
   </section>
 
   <p class="note">Розрахунок виконується на вашому пристрої: сторінка нічого нікуди не надсилає. ПІБ, КТП і ділянка запам’ятовуються лише в цьому браузері, якщо він це дозволяє. Суми орієнтовні — звіряйте з квитанцією.</p>
-  <p class="note ver" id="ver">Версія сторінки 1.1.1 (30.10.2026)</p>
+  <p class="note ver" id="ver">Версія сторінки 1.1.2 (30.10.2026)</p>
 </main>
+</div>
 
 <script>
 /* QRCode for JavaScript, (c) 2009 Kazuhiko Arase, MIT license (http://www.opensource.org/licenses/mit-license.php). QR Code is a registered trademark of DENSO WAVE INCORPORATED. */
@@ -1454,18 +1459,9 @@ return req("./index");})();
 </script>
 <script>
   // Telegram: повідомляємо, що сторінка готова, і розгортаємо її (поза Telegram нічого не робить)
-  var PAGE_VERSION = "1.1.1 (30.10.2026)";
+  var PAGE_VERSION = "1.1.2 (30.10.2026)";
   var tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
-  // Android WebView інколи не перемальовує поля, поки відкрита клавіатура: «підштовхуємо» перемальовування при введенні й зміні розміру
-  function nudge() {
-    try { var b = document.body; b.style.transform = 'translateZ(0)'; void b.offsetHeight; requestAnimationFrame(function () { b.style.transform = ''; }); } catch (e) {}
-  }
-  document.addEventListener('input', nudge, true);
-  document.addEventListener('focusin', nudge, true);
-  window.addEventListener('resize', nudge);
-  if (window.visualViewport) window.visualViewport.addEventListener('resize', nudge);
-
   function el(id) { return document.getElementById(id); }
   var ids = ['dprev','dcur','nprev','ncur','months','target','tday','tnight','fktp','fserv','flight'];
 
