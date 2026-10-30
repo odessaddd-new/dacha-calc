@@ -173,7 +173,10 @@
     <div class="btns">
       <a class="btn" id="paylink" href="#" target="_blank" rel="noopener">Відкрити платіж за посиланням</a>
       <button type="button" id="copylink">Скопіювати посилання</button>
+      <button type="button" id="pdfbtn">Завантажити рахунок (PDF)</button>
+      <button type="button" id="pdfshare" hidden>Поділитися рахунком…</button>
     </div>
+    <p class="hint" id="pdfmsg">Рахунок формується на вашому пристрої й нікуди не надсилається. Якщо файл не завантажився у вбудованому браузері Viber, відкрийте сторінку в браузері: меню ⋮ → «Відкрити в браузері».</p>
     <p class="note">QR і посилання сформовані за стандартом НБУ: відскануйте QR у застосунку свого банку або відкрийте посилання. Перед оплатою перевірте суму й призначення в банку.</p>
   </section>
 
@@ -1454,7 +1457,9 @@ return req("./index");})();
   function fmt(n, d) { return n.toLocaleString('uk-UA', { minimumFractionDigits: d, maximumFractionDigits: d }); }
   function kwh(n) { return fmt(n, n % 1 === 0 ? 0 : 2); }
 
+  var _rows = [];
   function row(k, v, cls) {
+    _rows.push({ k: k, v: v, total: cls === 'total' });
     return '<div class="row ' + (cls || '') + '"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>';
   }
   function showError(msg) {
@@ -1482,6 +1487,7 @@ return req("./index");})();
 
     var fixedIds = ['fktp', 'fserv', 'flight'], fixedNames = ['Втрати КТП', 'Обслуговування', 'Вуличне освітлення'];
     var html = '', total = 0;
+    _rows = [];
 
     var dUsed = dc - dp, dSum = dUsed * tday;
     html += row('День: ' + kwh(dUsed) + ' кВт·год × ' + fmt(tday, 2), fmt(dSum, 2) + ' грн');
@@ -1604,6 +1610,8 @@ return req("./index");})();
     addItem(req, 'ЄДРПОУ', RECV.edrpou);
     addItem(req, 'Сума, грн', fmt(amount, 2).replace(/\s/g, '').replace(',', '.'), true);
     addItem(req, 'Призначення платежу', purpose);
+    lastPay = { total: amount, purpose: purpose, url: url, rows: _rows.slice(), pib: pib, ktp: ktp, plot: plot,
+                dprev: el('dprev').value.trim(), dcur: dc, nprev: el('nprev').value.trim(), ncur: nc, nightDone: nightDone };
     el('paylink').href = url;
     el('copylink').onclick = function () { var b = this; copyText(url, function (ok) { flash(b, ok); }); };
     el('pay').hidden = false;
@@ -1620,6 +1628,132 @@ return req("./index");})();
     el('forgetmsg').hidden = false; setTimeout(function () { el('forgetmsg').hidden = true; }, 2500);
     calc();
   });
+
+  // ---- Рахунок на оплату у PDF: малюємо на canvas і вкладаємо у простий PDF (без бібліотек); нічого нікуди не надсилається ----
+  var lastPay = null;
+  function wrapText(ctx, text, maxW) {
+    var words = String(text).split(/\s+/), lines = [], cur = '';
+    words.forEach(function (w) {
+      while (ctx.measureText(w).width > maxW) {                 // дуже довге слово (посилання) ріжемо за шириною
+        var i = w.length; while (i > 1 && ctx.measureText(w.slice(0, i)).width > maxW) i--;
+        if (cur) { lines.push(cur); cur = ''; }
+        lines.push(w.slice(0, i)); w = w.slice(i);
+      }
+      var t = cur ? cur + ' ' + w : w;
+      if (cur && ctx.measureText(t).width > maxW) { lines.push(cur); cur = w; } else cur = t;
+    });
+    if (cur) lines.push(cur);
+    return lines;
+  }
+  function drawQr(ctx, x, y, size, text) {
+    var q = new QRCodeLib(-1, 0); q.addData(text); q.make();
+    var n = q.getModuleCount(), cell = size / (n + 8);
+    ctx.fillStyle = '#fff'; ctx.fillRect(x, y, size, size); ctx.fillStyle = '#000';
+    for (var r = 0; r < n; r++) for (var c = 0; c < n; c++) if (q.isDark(r, c)) {
+      var x0 = Math.round(x + (c + 4) * cell), y0 = Math.round(y + (r + 4) * cell);
+      ctx.fillRect(x0, y0, Math.round(x + (c + 5) * cell) - x0, Math.round(y + (r + 5) * cell) - y0);
+    }
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x + size / 2, y + size / 2, size * 0.075, 0, 6.2832); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.font = '700 ' + Math.round(size * 0.12) + 'px Arial, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('₴', x + size / 2, y + size / 2 + 2);
+  }
+  function drawInvoice(S) {                                      // S — масштаб шрифтів (зменшуємо, якщо не вміщується)
+    var P = lastPay, W = 1240, H = 1754, M = 100, CW = W - 2 * M, y = M;
+    var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+    var ctx = cv.getContext('2d'), FONT = '-apple-system, "Segoe UI", Roboto, Arial, sans-serif';
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    function font(sz, w) { ctx.font = (w || 400) + ' ' + Math.round(sz * S) + 'px ' + FONT; }
+    function text(t, sz, w, col, x, align) { font(sz, w); ctx.fillStyle = col || '#111'; ctx.textAlign = align || 'left'; ctx.textBaseline = 'alphabetic'; ctx.fillText(t, x == null ? M : x, y); }
+    function head(t) { y += 22 * S; text(t.toUpperCase(), 22, 700, '#0b6b78'); y += 12 * S; ctx.fillStyle = '#0b6b78'; ctx.fillRect(M, y, CW, 2); y += 38 * S; }
+    function pair(k, v) {                                         // «підпис — значення» в один рядок
+      text(k, 26, 400, '#55696f'); text(v, 28, 500, '#111', M + 300);
+      y += 42 * S;
+    }
+    text('Рахунок на оплату', 58, 700, '#0b6b78'); y += 50 * S;
+    text('за електроенергію · сформовано ' + new Date().toLocaleDateString('uk-UA'), 26, 400, '#55696f'); y += 30 * S;
+
+    head('Платник');
+    pair('ПІБ', P.pib || '—'); pair('КТП', P.ktp || '—'); pair('Ділянка', P.plot || '—');
+
+    head('Показання лічильника, кВт·год');
+    pair('День', (P.dprev || '—') + '  →  ' + (P.dcur || '—'));
+    if (P.nightDone) pair('Ніч', (P.nprev || '—') + '  →  ' + (P.ncur || '—'));
+
+    head('Розрахунок');
+    P.rows.forEach(function (r) {
+      if (r.total) return;
+      font(26, 400); var ls = wrapText(ctx, r.k, CW - 260);
+      ls.forEach(function (l, i) { text(l, 26, 400, '#111'); if (i === 0) text(r.v, 26, 500, '#111', M + CW, 'right'); y += 36 * S; });
+      y += 6 * S;
+    });
+    ctx.fillStyle = '#c9d3d6'; ctx.fillRect(M, y - 8 * S, CW, 2); y += 40 * S;
+    text('До сплати', 34, 700, '#111'); text(fmt(P.total, 2) + ' грн', 40, 700, '#0b6b78', M + CW, 'right'); y += 30 * S;
+
+    head('Реквізити для оплати');
+    var qs = Math.round(360 * S), qx = M + CW - qs, y0 = y, colW = CW - qs - 40;
+    drawQr(ctx, qx, y0 - 6, qs, P.url);
+    function item(k, v, big) {
+      text(k, 22, 400, '#55696f'); y += 34 * S;
+      font(big ? 32 : 27, big ? 700 : 500);
+      wrapText(ctx, v, colW).forEach(function (l) { text(l, big ? 32 : 27, big ? 700 : 500, '#111'); y += (big ? 42 : 36) * S; });
+      y += 12 * S;
+    }
+    item('Отримувач', RECV.name); item('IBAN', RECV.iban); item('ЄДРПОУ', RECV.edrpou);
+    item('Сума, грн', fmt(P.total, 2).replace(/\s/g, '').replace(',', '.'), true);
+    item('Призначення платежу', P.purpose);
+    if (y < y0 + qs + 20) y = y0 + qs + 20;
+    y += 10 * S; font(22, 400);
+    wrapText(ctx, 'QR сформовано за стандартом НБУ: відскануйте його в застосунку свого банку. Суми орієнтовні — звіряйте з квитанцією. Перед оплатою перевірте суму й призначення в банку.', CW)
+      .forEach(function (l) { text(l, 22, 400, '#55696f'); y += 30 * S; });
+    return { cv: cv, endY: y };
+  }
+  function bytesOf(s) { var a = new Uint8Array(s.length); for (var i = 0; i < s.length; i++) a[i] = s.charCodeAt(i) & 255; return a; }
+  function jpegToPdf(jpg, w, h) {
+    var parts = [], offs = [], len = 0, i;
+    function push(b) { if (typeof b === 'string') b = bytesOf(b); parts.push(b); len += b.length; }
+    function obj(n, body) { offs[n] = len; push(n + ' 0 obj\n' + body + '\nendobj\n'); }
+    push('%PDF-1.4\n');
+    obj(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    obj(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+    obj(3, '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595.28 841.89] /Resources << /XObject << /Im0 5 0 R >> >> /Contents 4 0 R >>');
+    var cs = 'q 595.28 0 0 841.89 0 0 cm /Im0 Do Q';
+    obj(4, '<< /Length ' + cs.length + ' >>\nstream\n' + cs + '\nendstream');
+    offs[5] = len;
+    push('5 0 obj\n<< /Type /XObject /Subtype /Image /Width ' + w + ' /Height ' + h + ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ' + jpg.length + ' >>\nstream\n');
+    push(jpg); push('\nendstream\nendobj\n');
+    var xr = len, x = 'xref\n0 6\n0000000000 65535 f \n';
+    for (i = 1; i <= 5; i++) x += ('0000000000' + offs[i]).slice(-10) + ' 00000 n \n';
+    push(x + 'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n' + xr + '\n%%EOF');
+    var out = new Uint8Array(len), p = 0;
+    parts.forEach(function (b) { out.set(b, p); p += b.length; });
+    return out;
+  }
+  function makePdf() {
+    var r = null, scales = [1, 0.92, 0.85, 0.78, 0.72];
+    for (var i = 0; i < scales.length; i++) { r = drawInvoice(scales[i]); if (r.endY <= 1754 - 90) break; }
+    var b64 = r.cv.toDataURL('image/jpeg', 0.92).split(',')[1], bin = atob(b64), jpg = new Uint8Array(bin.length);
+    for (var k = 0; k < bin.length; k++) jpg[k] = bin.charCodeAt(k);
+    var d = new Date(), pad = function (n) { return ('0' + n).slice(-2); };
+    return { blob: new Blob([jpegToPdf(jpg, r.cv.width, r.cv.height)], { type: 'application/pdf' }),
+             name: 'rahunok_' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '.pdf' };
+  }
+  el('pdfbtn').addEventListener('click', function () {
+    if (!lastPay) return;
+    var f = makePdf(), a = document.createElement('a');
+    a.href = URL.createObjectURL(f.blob); a.download = f.name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 60000);
+  });
+  try {
+    var probe = new File(['x'], 'a.pdf', { type: 'application/pdf' });
+    if (navigator.canShare && navigator.canShare({ files: [probe] })) {
+      el('pdfshare').hidden = false;
+      el('pdfshare').addEventListener('click', function () {
+        if (!lastPay) return;
+        var f = makePdf(), file = new File([f.blob], f.name, { type: 'application/pdf' });
+        navigator.share({ files: [file], title: 'Рахунок на оплату' }).catch(function () {});
+      });
+    }
+  } catch (e) {}
   calc();
 </script>
 </body>
