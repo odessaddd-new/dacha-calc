@@ -1,9 +1,9 @@
 <!doctype html>
 <!--
   Калькулятор світла (Telegram + Viber), GitHub Pages.
-  ВЕРСІЯ СТОРІНКИ: 1.1.2 (30.10.2026) — показується внизу сторінки («Версія сторінки …») і в PDF.
+  ВЕРСІЯ СТОРІНКИ: 1.2.1 (01.11.2026) — показується внизу сторінки («Версія сторінки …») і в PDF.
   Змінюючи файл, піднімайте версію в ТРЬОХ місцях: цей рядок, текст внизу сторінки (id="ver") і const PAGE_VERSION.
-  Історія: 1.0.0 — початковий калькулятор; 1.1.0 — рахунок на оплату в PDF, viewport; 1.1.1 — Telegram: ready/expand і перемальовування полів (Android); 1.1.2 — прокручується внутрішній блок #app замість документа, прибрано «підштовхування» (збій полів у Telegram на Android).
+  Історія: 1.0.0 — початковий калькулятор; 1.1.0 — рахунок на оплату в PDF, viewport; 1.1.1 — Telegram: ready/expand і перемальовування полів (Android); 1.1.2 — прокручується внутрішній блок #app замість документа, прибрано «підштовхування» (збій полів у Telegram на Android); 1.2.0 — облік: при формуванні платежу КТП, ділянка й суми записуються в таблицю товариства; 1.2.1 — до обліку додано показання лічильника (ПІБ не надсилається).
 -->
 <html lang="uk">
 <head>
@@ -188,12 +188,12 @@
       <button type="button" id="pdfbtn">Завантажити рахунок (PDF)</button>
       <button type="button" id="pdfshare" hidden>Поділитися рахунком…</button>
     </div>
-    <p class="hint" id="pdfmsg">Рахунок формується на вашому пристрої й нікуди не надсилається. Якщо файл не завантажився у вбудованому браузері Viber, відкрийте сторінку в браузері: меню ⋮ → «Відкрити в браузері».</p>
+    <p class="hint" id="pdfmsg">PDF формується на вашому пристрої. Якщо файл не завантажився у вбудованому браузері Viber, відкрийте сторінку в браузері: меню ⋮ → «Відкрити в браузері».</p>
     <p class="note">QR і посилання сформовані за стандартом НБУ: відскануйте QR у застосунку свого банку або відкрийте посилання. Перед оплатою перевірте суму й призначення в банку.</p>
   </section>
 
-  <p class="note">Розрахунок виконується на вашому пристрої: сторінка нічого нікуди не надсилає. ПІБ, КТП і ділянка запам’ятовуються лише в цьому браузері, якщо він це дозволяє. Суми орієнтовні — звіряйте з квитанцією.</p>
-  <p class="note ver" id="ver">Версія сторінки 1.1.2 (30.10.2026)</p>
+  <p class="note">Розрахунок виконується на вашому пристрої. КТП, ділянка, показання лічильника й суми розрахунку записуються в облік, коли ви формуєте платіж.</p>
+  <p class="note ver" id="ver">Версія сторінки 1.2.1 (01.11.2026)</p>
 </main>
 </div>
 
@@ -1459,7 +1459,7 @@ return req("./index");})();
 </script>
 <script>
   // Telegram: повідомляємо, що сторінка готова, і розгортаємо її (поза Telegram нічого не робить)
-  var PAGE_VERSION = "1.1.2 (30.10.2026)";
+  var PAGE_VERSION = "1.2.1 (01.11.2026)";
   var tg = window.Telegram && window.Telegram.WebApp;
   if (tg) { try { tg.ready(); tg.expand(); } catch (e) {} }
   function el(id) { return document.getElementById(id); }
@@ -1475,7 +1475,7 @@ return req("./index");})();
   function fmt(n, d) { return n.toLocaleString('uk-UA', { minimumFractionDigits: d, maximumFractionDigits: d }); }
   function kwh(n) { return fmt(n, n % 1 === 0 ? 0 : 2); }
 
-  var _rows = [];
+  var _rows = [], _parts = null;
   function row(k, v, cls) {
     _rows.push({ k: k, v: v, total: cls === 'total' });
     return '<div class="row ' + (cls || '') + '"><span class="k">' + k + '</span><span class="v">' + v + '</span></div>';
@@ -1506,28 +1506,30 @@ return req("./index");})();
     var fixedIds = ['fktp', 'fserv', 'flight'], fixedNames = ['Втрати КТП', 'Обслуговування', 'Вуличне освітлення'];
     var html = '', total = 0;
     _rows = [];
+    var parts = { months: months, day: 0, night: 0, ktp_loss: 0, service: 0, lighting: 0, target: 0 };
 
     var dUsed = dc - dp, dSum = dUsed * tday;
     html += row('День: ' + kwh(dUsed) + ' кВт·год × ' + fmt(tday, 2), fmt(dSum, 2) + ' грн');
-    total += dSum;
+    total += dSum; parts.day = dSum;
     if (nightDone) {
       var nUsed = nc - np, nSum = nUsed * tnight;
       html += row('Ніч: ' + kwh(nUsed) + ' кВт·год × ' + fmt(tnight, 2), fmt(nSum, 2) + ' грн');
-      total += nSum;
+      total += nSum; parts.night = nSum;
     }
     for (var i = 0; i < fixedIds.length; i++) {
       var f = num(el(fixedIds[i]).value);
       if (isNaN(f) || f <= 0) continue;
       var s = f * months;
       html += row(fixedNames[i] + (months > 1 ? ': ' + fmt(f, 2) + ' × ' + months + ' міс.' : ''), fmt(s, 2) + ' грн');
-      total += s;
+      total += s; parts[['ktp_loss', 'service', 'lighting'][i]] = s;
     }
     var tg = num(el('target').value);
-    if (!isNaN(tg) && tg > 0) { html += row('Цільові внески', fmt(tg, 2) + ' грн'); total += tg; }
+    if (!isNaN(tg) && tg > 0) { html += row('Цільові внески', fmt(tg, 2) + ' грн'); total += tg; parts.target = tg; }
 
     html += row('До сплати', fmt(total, 2) + ' грн', 'total');
     el('empty').hidden = true;
     el('lines').innerHTML = html;
+    _parts = parts;
     renderPay(total, el('dcur').value.trim(), el('ncur').value.trim(), nightDone);
   }
 
@@ -1602,7 +1604,7 @@ return req("./index");})();
     b.addEventListener('click', function () { copyText(value, function (ok) { flash(b, ok); }); });
     it.appendChild(l); it.appendChild(v); it.appendChild(b); parent.appendChild(it);
   }
-  function hidePay() { el('pay').hidden = true; }
+  function hidePay() { el('pay').hidden = true; lastPay = null; clearTimeout(idleTimer); }
 
   function renderPay(total, dc, nc, nightDone) {
     var pib = el('pib').value.trim(), ktp = el('ktp').value.trim(), plot = el('plot').value.trim();
@@ -1629,10 +1631,11 @@ return req("./index");})();
     addItem(req, 'Сума, грн', fmt(amount, 2).replace(/\s/g, '').replace(',', '.'), true);
     addItem(req, 'Призначення платежу', purpose);
     lastPay = { total: amount, purpose: purpose, url: url, rows: _rows.slice(), pib: pib, ktp: ktp, plot: plot,
-                dprev: el('dprev').value.trim(), dcur: dc, nprev: el('nprev').value.trim(), ncur: nc, nightDone: nightDone };
+                parts: _parts, dprev: el('dprev').value.trim(), dcur: dc, nprev: el('nprev').value.trim(), ncur: nc, nightDone: nightDone };
     el('paylink').href = url;
     el('copylink').onclick = function () { var b = this; copyText(url, function (ok) { flash(b, ok); }); };
     el('pay').hidden = false;
+    scheduleIdleLog();
   }
 
   // ПІБ, КТП і ділянку пам’ятаємо лише в цьому браузері (якщо він це дозволяє)
@@ -1767,11 +1770,36 @@ return req("./index");})();
       el('pdfshare').hidden = false;
       el('pdfshare').addEventListener('click', function () {
         if (!lastPay) return;
+        logCalc('pdf');
         var f = makePdf(), file = new File([f.blob], f.name, { type: 'application/pdf' });
         navigator.share({ files: [file], title: 'Рахунок на оплату' }).catch(function () {});
       });
     }
   } catch (e) {}
+
+  // ---- Облік: при формуванні платежу в таблицю товариства йдуть час, КТП, ділянка, показання лічильника, суми й кількість місяців. ПІБ НЕ надсилається. ----
+  var STATS_URL = "https://script.google.com/macros/s/AKfycbzxymDp66D5HwsPivSfKU3FBc0a0pQXMEWknC-slrBHMl7hldZNi4Ajw_k9l3aT8aKhVg/exec";
+  var idleTimer = null, logged = {};
+  function logCalc(kind) {
+    var P = lastPay; if (!P || !P.parts || !STATS_URL) return;
+    var key = [P.ktp, P.plot, P.total].join('|');
+    if (kind === 'idle' ? Object.keys(logged).some(function (k) { return k.indexOf(key + '|') === 0; }) : logged[key + '|' + kind]) return;   // idle — лише якщо за цю суму ще не було pdf/bank
+    logged[key + '|' + kind] = 1;
+    var d = P.parts;
+    try {
+      fetch(STATS_URL, { method: 'POST', mode: 'no-cors', keepalive: true, headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ action: 'calc', kind: kind, src: (tg && tg.initData) ? 'telegram' : 'web', ver: PAGE_VERSION,
+          d: { ktp: P.ktp, plot: P.plot, total: P.total, day: d.day, night: d.night, ktp_loss: d.ktp_loss, service: d.service, lighting: d.lighting, target: d.target, months: d.months,
+                 day_prev: num(P.dprev), day_cur: num(P.dcur), night_prev: P.nightDone ? num(P.nprev) : null, night_cur: P.nightDone ? num(P.ncur) : null } }) })
+        .catch(function () {});
+    } catch (e) {}
+  }
+  function scheduleIdleLog() {                         // сума не змінюється 30 с — теж фіксуємо
+    clearTimeout(idleTimer); idleTimer = setTimeout(function () { logCalc('idle'); }, 30000);
+  }
+  el('pdfbtn').addEventListener('click', function () { logCalc('pdf'); });
+  el('paylink').addEventListener('click', function () { logCalc('bank'); });
+  el('copylink').addEventListener('click', function () { logCalc('bank'); });
   calc();
 </script>
 </body>
